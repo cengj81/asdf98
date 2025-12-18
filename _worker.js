@@ -1,68 +1,235 @@
-﻿import { connect } from "cloudflare:sockets";
-let config_JSON, 反代IP = '', 启用SOCKS5反代 = null, 启用SOCKS5全局反代 = false, 我的SOCKS5账号 = '', parsedSocks5Address = {};
-let SOCKS5白名单 = ['*tapecontent.net', '*cloudatacdn.com', '*loadshare.org', '*cdn-centaurus.com', 'scholar.google.com'];
-const Pages静态页面 = 'https://edt-pages.github.io';
-///////////////////////////////////////////////////////stallTCP参数///////////////////////////////////////////////
-const MAX_PENDING = 8 * 1024 * 1024,  // 最大缓冲大小（字节）：8MB，超过此值将触发背压控制，防止内存溢出
-    KEEPALIVE = 15000,           // 心跳保活间隔（毫秒）：15秒，定期向服务器发送空包保持连接活跃
-    STALL_TIMEOUT = 8000,        // 连接停滞检测超时（毫秒）：8秒，检测数据流是否中断
-    MAX_STALL = 12,              // 最大连续停滞次数：触发12次停滞后将重新连接（12 × 8秒 = 96秒）
-    MAX_RECONNECT = 24;          // 最大重连尝试次数：超过24次重连失败后关闭连接
-///////////////////////////////////////////////////////主程序入口///////////////////////////////////////////////
-export default {
-    async fetch(request, env) {
-        const url = new URL(request.url);
-        const UA = request.headers.get('User-Agent') || 'null';
-        const upgradeHeader = request.headers.get('Upgrade');
-        const 管理员密码 = env.ADMIN || env.admin || env.PASSWORD || env.password || env.pswd || env.TOKEN || env.KEY;
-        const 加密秘钥 = env.KEY || '勿动此默认密钥，有需求请自行通过添加变量KEY进行修改';
-        const userIDMD5 = await MD5MD5(管理员密码 + 加密秘钥);
-        const userID = env.UUID || env.uuid || [userIDMD5.slice(0, 8), userIDMD5.slice(8, 12), '4' + userIDMD5.slice(13, 16), userIDMD5.slice(16, 20), userIDMD5.slice(20)].join('-');
-        if (env.PROXYIP) {
-            const proxyIPs = await 整理成数组(env.PROXYIP);
-            反代IP = proxyIPs[Math.floor(Math.random() * proxyIPs.length)];
-        } else 反代IP = 反代IP ? 反代IP : request.cf.colo + '.PrOxYIp.CmLiUsSsS.nEt';
-        const 访问IP = request.headers.get('X-Real-IP') || request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || request.headers.get('True-Client-IP') || request.headers.get('Fly-Client-IP') || request.headers.get('X-Appengine-Remote-Addr') || request.headers.get('X-Forwarded-For') || request.headers.get('X-Real-IP') || request.headers.get('X-Cluster-Client-IP') || request.cf?.clientTcpRtt || '未知IP';
-        if (env.GO2SOCKS5) SOCKS5白名单 = await 整理成数组(env.GO2SOCKS5);
-        if (!upgradeHeader || upgradeHeader !== 'websocket') {
-            if (url.protocol === 'http:') return Response.redirect(url.href.replace(`http://${url.hostname}`, `https://${url.hostname}`), 301);
-            if (!管理员密码) return fetch(Pages静态页面 + '/noADMIN').then(r => { const headers = new Headers(r.headers); headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate'); headers.set('Pragma', 'no-cache'); headers.set('Expires', '0'); return new Response(r.body, { status: 404, statusText: r.statusText, headers }); });
-            if (!env.KV) return fetch(Pages静态页面 + '/noKV').then(r => { const headers = new Headers(r.headers); headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate'); headers.set('Pragma', 'no-cache'); headers.set('Expires', '0'); return new Response(r.body, { status: 404, statusText: r.statusText, headers }); });
-            const 访问路径 = url.pathname.slice(1).toLowerCase();
-            const 区分大小写访问路径 = url.pathname.slice(1);
-            if (访问路径 === 加密秘钥 && 加密秘钥 !== '勿动此默认密钥，有需求请自行通过添加变量KEY进行修改') {//快速订阅
-                return new Response('重定向中...', { status: 302, headers: { 'Location': `/sub?token=${await MD5MD5(url.host + userID)}` } });
-            } else if (访问路径 === 'login') {//处理登录页面和登录请求
-                const cookies = request.headers.get('Cookie') || '';
-                const authCookie = cookies.split(';').find(c => c.trim().startsWith('auth='))?.split('=')[1];
-                if (authCookie == await MD5MD5(UA + 加密秘钥 + 管理员密码)) return new Response('重定向中...', { status: 302, headers: { 'Location': '/admin' } });
-                if (request.method === 'POST') {
-                    const formData = await request.text();
-                    const params = new URLSearchParams(formData);
-                    const 输入密码 = params.get('password');
-                    if (输入密码 === 管理员密码) {
-                        // 密码正确，设置cookie并返回成功标记
-                        const 响应 = new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
-                        响应.headers.set('Set-Cookie', `auth=${await MD5MD5(UA + 加密秘钥 + 管理员密码)}; Path=/; Max-Age=86400; HttpOnly`);
-                        return 响应;
-                    }
-                }
-                return fetch(Pages静态页面 + '/login');
-            } else if (访问路径 == 'admin' || 访问路径.startsWith('admin/')) {//验证cookie后响应管理页面
-                const cookies = request.headers.get('Cookie') || '';
-                const authCookie = cookies.split(';').find(c => c.trim().startsWith('auth='))?.split('=')[1];
-                // 没有cookie或cookie错误，跳转到/login页面
-                if (!authCookie || authCookie !== await MD5MD5(UA + 加密秘钥 + 管理员密码)) return new Response('重定向中...', { status: 302, headers: { 'Location': '/login' } });
-                if (访问路径 === 'admin/log.json') {// 读取日志内容
-                    const 读取日志内容 = await env.KV.get('log.json') || '[]';
-                    return new Response(读取日志内容, { status: 200, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
-                } else if (区分大小写访问路径 === 'admin/getCloudflareUsage') {// 查询请求量
-                    try {
-                        const Usage_JSON = await getCloudflareUsage(url.searchParams.get('Email'), url.searchParams.get('GlobalAPIKey'), url.searchParams.get('AccountID'), url.searchParams.get('APIToken'));
                         return new Response(JSON.stringify(Usage_JSON, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
                     } catch (err) {
                         const errorResponse = { msg: '查询请求量失败，失败原因：' + err.message, error: err.message };
-                        return new Response(JSON.stringify(errorResponse, null, 2), { status: 500, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
+                        return new Response(JSON.stringify(errorResponse, null, 2), { status: 500, headers: { 'Content-Type': 'application/json;charset=utf-8' } });const WS_READY_STATE_OPEN = 1;
+const WS_READY_STATE_CLOSING = 2;
+
+// cmliu 优质 ProxyIP（2025年12月活跃，大陆访问极佳）
+const PROXY_IPS = [
+  'ProxyIP.SG.CMLiussss.net:443',  // 新加坡（大陆首选，低延迟最稳）
+  'ProxyIP.HK.CMLiussss.net:443',  // 香港
+  'ProxyIP.JP.CMLiussss.net:443',  // 日本
+  'ProxyIP.US.CMLiussss.net:443',  // 美国
+  'ProxyIP.KR.CMLiussss.net:443',  // 韩国备选
+];
+
+const encoder = new TextEncoder();
+
+import { connect } from 'cloudflare:sockets';
+
+export default {
+  async fetch(request) {
+    try {
+      const url = new URL(request.url);
+      const upgradeHeader = request.headers.get('Upgrade');
+
+      // 非 WebSocket 请求：返回友好页面（避免 Error 1101）
+      if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+        return new Response(
+          `<h1>WebSocket Proxy Running</h1>
+          <p>Worker 运行正常，仅支持 WebSocket 连接。</p>
+          <p>地址: wss://${url.hostname}</p>
+          <p>Token: qwe123</p>
+          <hr>
+          <small>Time: ${new Date().toISOString()} | 使用 cmliu ProxyIP 优化</small>`,
+          {
+            status: 200,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' }
+          }
+        );
+      }
+
+      // Token 验证（建议修改为更强）
+      const token = 'qwe123';
+
+      if (token && request.headers.get('Sec-WebSocket-Protocol') !== token) {
+        return new Response('Unauthorized: Invalid token', { status: 401 });
+      }
+
+      const webSocketPair = new WebSocketPair();
+      const [client, server] = Object.values(webSocketPair);
+      server.accept();
+
+      handleSession(server).catch((err) => {
+        console.error('handleSession error:', err);
+        safeCloseWebSocket(server);
+      });
+
+      const responseHeaders = new Headers();
+      if (token) {
+        responseHeaders.set('Sec-WebSocket-Protocol', token);
+      }
+
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+        headers: responseHeaders
+      });
+
+    } catch (err) {
+      console.error('fetch error:', err);
+      return new Response(`Internal Error: ${err.message || err}`, { status: 500 });
+    }
+  },
+};
+
+async function handleSession(webSocket) {
+  let remoteSocket = null;
+  let remoteWriter = null;
+  let remoteReader = null;
+  let isClosed = false;
+
+  const cleanup = () => {
+    if (isClosed) return;
+    isClosed = true;
+
+    try { remoteWriter?.releaseLock(); } catch {}
+    try { remoteReader?.releaseLock(); } catch {}
+    try { remoteSocket?.close(); } catch {}
+
+    remoteSocket = remoteWriter = remoteReader = null;
+    safeCloseWebSocket(webSocket);
+  };
+
+  const pumpRemoteToWebSocket = async () => {
+    if (!remoteReader) return;
+    try {
+      while (!isClosed) {
+        const { done, value } = await remoteReader.read();
+        if (done) break;
+        if (webSocket.readyState !== WS_READY_STATE_OPEN) break;
+        if (value && value.byteLength > 0) {
+          webSocket.send(value);
+        }
+      }
+    } catch (e) {
+      console.error('pump error:', e);
+    } finally {
+      cleanup();
+    }
+  };
+
+  const parseAddress = (addr) => {
+    try {
+      if (addr.startsWith('[')) {
+        const end = addr.indexOf(']');
+        if (end === -1) throw new Error('Invalid IPv6');
+        return {
+          host: addr.substring(1, end),
+          port: parseInt(addr.substring(end + 2), 10)
+        };
+      }
+      const sep = addr.lastIndexOf(':');
+      if (sep === -1) throw new Error('Invalid address');
+      return {
+        host: addr.substring(0, sep),
+        port: parseInt(addr.substring(sep + 1), 10)
+      };
+    } catch {
+      throw new Error('Address parse failed');
+    }
+  };
+
+  const connectToRemote = async (targetAddr, firstFrameData) => {
+    let host, port;
+    try {
+      ({ host, port } = parseAddress(targetAddr));
+    } catch {
+      try { webSocket.send('ERROR:Invalid address'); } catch {}
+      return;
+    }
+
+    // 连接顺序：先原始域名（能访问推特等CF站点），再 cmliu ProxyIP
+    const attempts = [host, ...PROXY_IPS];
+
+    for (const attempt of attempts) {
+      if (isClosed) return;
+
+      let connectHost = attempt;
+      let connectPort = port;
+      if (attempt.includes(':')) {
+        const parts = attempt.split(':');
+        connectHost = parts[0];
+        connectPort = parseInt(parts[1], 10);
+      }
+
+      try {
+        remoteSocket = connect({
+          hostname: connectHost,
+          port: connectPort
+        });
+
+        await remoteSocket.opened;
+
+        remoteWriter = remoteSocket.writable.getWriter();
+        remoteReader = remoteSocket.readable.getReader();
+
+        if (firstFrameData) {
+          await remoteWriter.write(encoder.encode(firstFrameData));
+        }
+
+        webSocket.send('CONNECTED');
+        pumpRemoteToWebSocket();
+        return;
+
+      } catch (err) {
+        console.error(`Connect failed to \( {connectHost}: \){connectPort}`, err);
+
+        try { remoteWriter?.releaseLock(); } catch {}
+        try { remoteReader?.releaseLock(); } catch {}
+        try { remoteSocket?.close(); } catch {}
+        remoteSocket = remoteWriter = remoteReader = null;
+      }
+    }
+
+    try { webSocket.send('ERROR:All attempts failed'); } catch {}
+    cleanup();
+  };
+
+  webSocket.addEventListener('message', async (event) => {
+    if (isClosed) return;
+
+    try {
+      const data = event.data;
+
+      if (typeof data === 'string') {
+        if (data.startsWith('CONNECT:')) {
+          const sep = data.indexOf('|', 8);
+          if (sep === -1) return;
+          const addr = data.substring(8, sep);
+          const payload = data.substring(sep + 1);
+          await connectToRemote(addr, payload);
+        } else if (data.startsWith('DATA:')) {
+          if (remoteWriter) {
+            await remoteWriter.write(encoder.encode(data.substring(5)));
+          }
+        } else if (data === 'CLOSE') {
+          cleanup();
+        }
+      } else if (data instanceof ArrayBuffer && remoteWriter) {
+        await remoteWriter.write(new Uint8Array(data));
+      }
+    } catch (err) {
+      console.error('message error:', err);
+      try { webSocket.send('ERROR:' + (err.message || 'Unknown')); } catch {}
+      cleanup();
+    }
+  });
+
+  webSocket.addEventListener('close', cleanup);
+  webSocket.addEventListener('error', (e) => {
+    console.error('WebSocket error:', e);
+    cleanup();
+  });
+}
+
+function safeCloseWebSocket(ws) {
+  try {
+    if (ws.readyState === WS_READY_STATE_OPEN || ws.readyState === WS_READY_STATE_CLOSING) {
+      ws.close(1000, 'Normal closure');
+    }
+  } catch {}
+}
                     }
                 } else if (区分大小写访问路径 === 'admin/getADDAPI') {// 验证优选API
                     if (url.searchParams.get('url')) {
@@ -1825,3 +1992,4 @@ async function html1101(host, 访问IP) {
 </body>
 </html>`;
 }
+
